@@ -1,0 +1,7 @@
+FROM local/php:7.1
+
+# add cron jobs
+COPY cron/* /etc/cron.d/
+RUN chown -R root:root /etc/cron.d/ \
+    && chmod go-w /etc/cron.d/* \
+    && chmod a+x /etc/cron.d/*

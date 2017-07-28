@@ -1,0 +1,159 @@
+version: '2'
+
+
+networks:
+  default:
+    external:
+      name: nginxproxydocker_default
+
+
+services:
+
+
+  app_data:
+    image: tianon/true
+    container_name: app1_app_data
+    volumes:
+      - ./../application/:/var/www/html/
+
+
+  db_data:
+    image: tianon/true
+    container_name: app1_db_data
+    volumes:
+      - ./../data/mysql/data/:/var/lib/mysql/
+
+
+  log_data:
+    image: tianon/true
+    container_name: app1_log_data
+    volumes:
+      - ./../log/nginx/:/var/log/nginx/
+      - ./../log/php/:/var/log/php/
+      - ./../log/mysql/:/var/log/mysql/
+      - ./../log/malware-check/:/var/log/malware-check/
+      - ./../application/current/src/var/log/:/var/log/magento/
+
+
+  composer_data:
+    image: tianon/true
+    container_name: app1_composer_data
+    volumes:
+      - ./../data/composer/:/root/.composer/
+
+
+  redis_data:
+    image: tianon/true
+    container_name: app1_redis_data
+    volumes:
+      - ./../data/redis/:/data/
+
+
+  nginx:
+    image: nginx:latest
+    links:
+      - php
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./config/nginx/sites-enabled/default.conf:/etc/nginx/conf.d/default.conf
+      - ./config/nginx/includes/:/etc/nginx/includes/
+      - ./config/nginx/custom-locations/:/etc/nginx/custom-locations/
+    volumes_from:
+      - app_data
+      - log_data
+    depends_on:
+      - php
+    container_name: example.com.local
+    environment:
+      - VIRTUAL_HOST=example.com
+      - VIRTUAL_PORT=80
+      - VIRTUAL_PROTO=http
+      - VIRTUAL_NETWORK=nginx-proxy
+      - LETSENCRYPT_HOST=example.com
+      - LETSENCRYPT_EMAIL=me@example.com
+
+
+  php:
+    build:
+      context: ./config/php
+      dockerfile: Dockerfile-php-baseimage
+    image: local/php:7.1
+    volumes:
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/php.ini
+    volumes_from:
+      - app_data
+      - log_data
+    links:
+      - db
+      - redis
+    working_dir: /var/www/html/
+
+
+  php-cron:
+    build:
+      context: ./config/php
+      dockerfile: Dockerfile-php-baseimage-cron
+    image: local/php:7.1-cron
+    volumes_from:
+      - app_data
+      - log_data
+    depends_on:
+      - php
+    links:
+      - db
+    working_dir: /var/www/html/
+
+
+  deploy:
+    build:
+      context: ./config/php
+      dockerfile: Dockerfile-php-baseimage-cli
+    image: local/php:7.1-cli
+    volumes:
+      - ./data/deploy/:/var/www/deploy/
+    volumes_from:
+      - app_data
+      - log_data
+      - composer_data
+    depends_on:
+      - php
+    working_dir: /var/www/deploy/
+
+
+  db:
+    image: percona:5.7
+    volumes:
+      - ./config/mysql/:/etc/mysql/conf.d/
+      - ./data/mysql/initial-data/:/docker-entrypoint-initdb.d/
+    volumes_from:
+      - db_data
+      - log_data
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=db
+    ports:
+      - 3306:3306
+
+
+  redis:
+    image: redis:3
+    volumes:
+      - ./config/redis/redis.conf:/etc/redis.conf:ro
+    volumes_from:
+      - redis_data
+    command: redis-server /etc/redis.conf
+
+
+  logrotate:
+    image: blacklabelops/logrotate:latest
+    volumes_from:
+      - app_data
+      - log_data
+      - malware-check
+    environment:
+      - LOGS_DIRECTORIES=/var/log/nginx/ /var/log/php/ /var/log/mysql/
+      - LOGROTATE_INTERVAL=daily
+      - LOGROTATE_COPIES=60
+      - LOGROTATE_SIZE=10M
+      - LOGROTATE_PARAMETERS=v
+      - LOGROTATE_CRONSCHEDULE=0 0 * * * *
